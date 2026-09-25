@@ -397,3 +397,9 @@ h1 {
     grid-template-columns: repeat(1, 1fr);
   }
 }
+
+@media (max-width: 950px) and (orientation: landscape) {
+  .pokemon-grid {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}

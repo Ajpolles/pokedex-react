@@ -499,7 +499,7 @@ function App() {
               </div>
 
               <div className={`weaknesses-panel card-bg-${mainType}`}>
-                <div className="section-title">Effective</div>
+                <div className="section-title">Strengths</div>
                 {loadingWeaknesses ? (
                   <p>Loading...</p>
                 ) : (

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import './App.css'
 import axios from 'axios'
 import bgImage from './pokedex-background.webp'
@@ -10,6 +10,32 @@ function App() {
   const [selectedPokemon, setSelectedPokemon] = useState(null)
   const [pokemonDetails, setPokemonDetails] = useState(null)
   const [loadingDetails, setLoadingDetails] = useState(false)
+
+  const [isFilterOpen, setIsFilterOpen] = useState(false)
+  const filterRef = useRef(null)
+
+  const [selectedTypes, setSelectedTypes] = useState([])
+  const [selectedGens, setSelectedGens] = useState([])
+  const [filterLegendary, setFilterLegendary] = useState(false)
+  const [filterMythical, setFilterMythical] = useState(false)
+
+  const ALL_TYPES = [
+    'normal', 'fire', 'water', 'grass', 'electric', 'ice', 
+    'fighting', 'poison', 'ground', 'flying', 'psychic', 'bug', 
+    'rock', 'ghost', 'dragon', 'dark', 'steel', 'fairy'
+  ]
+
+  const ALL_GENS = ['Gen 1', 'Gen 2', 'Gen 3', 'Gen 4', 'Gen 5', 'Gen 6', 'Gen 7', 'Gen 8', 'Gen 9']
+
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (filterRef.current && !filterRef.current.contains(event.target)) {
+        setIsFilterOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [])
 
   useEffect(() => {
     const fetchAllPokemon = async () => {
@@ -23,7 +49,22 @@ function App() {
         })
 
         const detailedPokemonData = await Promise.all(detailedPokemonPromises)
-        setAllPokemon(detailedPokemonData)
+        
+        const enhancedPokemonPromises = detailedPokemonData.map(async (p) => {
+          try {
+            const speciesRes = await axios.get(`https://pokeapi.co/api/v2/pokemon-species/${p.id}`)
+            return {
+              ...p,
+              isLegendary: speciesRes.data.is_legendary,
+              isMythical: speciesRes.data.is_mythical
+            }
+          } catch {
+            return { ...p, isLegendary: false, isMythical: false }
+          }
+        })
+
+        const fullyDetailedData = await Promise.all(enhancedPokemonPromises)
+        setAllPokemon(fullyDetailedData)
         setLoading(false)
       } catch (err) {
         console.error("Error fetching Pokémon list:", err)
@@ -98,11 +139,37 @@ function App() {
     setPokemonDetails(null)
   }
 
+  const toggleTypeFilter = (type) => {
+    setSelectedTypes(prev => 
+      prev.includes(type) ? prev.filter(t => t !== type) : [...prev, type]
+    )
+  }
+
+  const toggleGenFilter = (gen) => {
+    setSelectedGens(prev => 
+      prev.includes(gen) ? prev.filter(g => g !== gen) : [...prev, gen]
+    )
+  }
+
+  const activeFiltersCount = selectedTypes.length + selectedGens.length + (filterLegendary ? 1 : 0) + (filterMythical ? 1 : 0)
+
   const filteredPokemon = allPokemon.filter((p) => {
     const query = search.toLowerCase().trim()
-    if (!query) return true
-    return p.name.includes(query) || p.id.toString() === query
+    const matchesSearch = !query || p.name.includes(query) || p.id.toString() === query
+
+    const pokemonTypes = p.types.map(t => t.type.name)
+    const matchesTypes = selectedTypes.length === 0 || selectedTypes.every(t => pokemonTypes.includes(t))
+
+    const info = getGenerationAndRegion(p.id)
+    const matchesGen = selectedGens.length === 0 || selectedGens.includes(info.gen)
+
+    const matchesLegendary = !filterLegendary || p.isLegendary
+    const matchesMythical = !filterMythical || p.isMythical
+
+    return matchesSearch && matchesTypes && matchesGen && matchesLegendary && matchesMythical
   })
+
+  const mainType = selectedPokemon ? selectedPokemon.types[0].type.name : 'normal'
 
   return (
     <div 
@@ -116,26 +183,107 @@ function App() {
         boxSizing: 'border-box'
       }}
     >
-      <h1>Pokédex Gallery</h1>
+      <h1>Pokédex</h1>
       
-      <div className="search-box">
-        <input 
-          type="text" 
-          value={search} 
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search Pokemon name or ID..."
-        />
+      <div className="search-filter-bar" ref={filterRef}>
+        <div className="search-box">
+          <input 
+            type="text" 
+            value={search} 
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search a Pokemon"
+          />
+        </div>
+
+        <div className="filter-dropdown-wrapper">
+          <button 
+            className={`filter-toggle-btn ${activeFiltersCount > 0 ? 'has-filters' : ''}`}
+            onClick={() => setIsFilterOpen(!isFilterOpen)}
+          >
+            Filters {activeFiltersCount > 0 && <span className="filter-count">{activeFiltersCount}</span>}
+          </button>
+
+          {isFilterOpen && (
+            <div className="filters-menu">
+              <div className="filter-header-row">
+                <h4>Filters</h4>
+                {activeFiltersCount > 0 && (
+                  <button 
+                    className="clear-filters-btn"
+                    onClick={() => {
+                      setSelectedTypes([])
+                      setSelectedGens([])
+                      setFilterLegendary(false)
+                      setFilterMythical(false)
+                    }}
+                  >
+                    Reset All
+                  </button>
+                )}
+              </div>
+
+              <div className="filter-group">
+                <h4>Generation</h4>
+                <div className="badge-filters">
+                  {ALL_GENS.map(gen => (
+                    <button 
+                      key={gen} 
+                      className={`filter-chip ${selectedGens.includes(gen) ? 'active' : ''}`}
+                      onClick={() => toggleGenFilter(gen)}
+                    >
+                      {gen}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="filter-group">
+                <h4>Status</h4>
+                <div className="badge-filters">
+                  <button 
+                    className={`filter-chip ${filterLegendary ? 'active' : ''}`}
+                    onClick={() => setFilterLegendary(!filterLegendary)}
+                  >
+                    Legendary
+                  </button>
+                  <button 
+                    className={`filter-chip ${filterMythical ? 'active' : ''}`}
+                    onClick={() => setFilterMythical(!filterMythical)}
+                  >
+                    Mythical
+                  </button>
+                </div>
+              </div>
+
+              <div className="filter-group">
+                <h4>Type</h4>
+                <div className="badge-filters">
+                  {ALL_TYPES.map(type => (
+                    <button 
+                      key={type} 
+                      className={`filter-chip type-${type} ${selectedTypes.includes(type) ? 'active-type' : ''}`}
+                      onClick={() => toggleTypeFilter(type)}
+                    >
+                      {type}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
       </div>
 
       {loading ? (
-        <p className="loading-msg">Loading all generations of Pokémon...</p>
+        <p className="loading-msg">Loading all generations of Pokémon... Please wait!</p>
       ) : (
         <div className="pokemon-grid">
           {filteredPokemon.length > 0 ? (
             filteredPokemon.map((pokemon) => {
               const info = getGenerationAndRegion(pokemon.id);
+              const primaryType = pokemon.types[0].type.name;
               return (
-                <div className="pokemon-card" key={pokemon.id} onClick={() => handleCardClick(pokemon)}>
+                <div className={`pokemon-card card-bg-${primaryType}`} key={pokemon.id} onClick={() => handleCardClick(pokemon)}>
                   <span className="generation-badge">{info.gen}</span>
                   <span className="id">#{pokemon.id}</span>
                   
@@ -160,14 +308,14 @@ function App() {
               );
             })
           ) : (
-            <p className="error-msg">No Pokémon found matching "{search}"</p>
+            <p className="error-msg">No Pokémon found matching your filters.</p>
           )}
         </div>
       )}
 
       {selectedPokemon && (
         <div className="modal-overlay" onClick={closeModal}>
-          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+          <div className={`modal-content card-bg-${mainType}`} onClick={(e) => e.stopPropagation()}>
             <button className="close-btn" onClick={closeModal}>&times;</button>
             
             <div className="modal-header">

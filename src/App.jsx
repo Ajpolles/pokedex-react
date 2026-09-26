@@ -10,6 +10,10 @@ function App() {
   const [selectedPokemon, setSelectedPokemon] = useState(null)
   const [pokemonDetails, setPokemonDetails] = useState(null)
   const [loadingDetails, setLoadingDetails] = useState(false)
+  const [weaknesses2x, setWeaknesses2x] = useState([])
+  const [weaknesses4x, setWeaknesses4x] = useState([])
+  const [strongAgainst, setStrongAgainst] = useState([])
+  const [loadingWeaknesses, setLoadingWeaknesses] = useState(false)
 
   const [isFilterOpen, setIsFilterOpen] = useState(false)
   const filterRef = useRef(null)
@@ -103,9 +107,61 @@ function App() {
     return evolutionNames
   }
 
+  const fetchCombatData = async (types) => {
+    setLoadingWeaknesses(true)
+    try {
+      const typePromises = types.map(t => axios.get(t.type.url))
+      const typeRes = await Promise.all(typePromises)
+      
+      const multiplierMap = {}
+      const strongSet = new Set()
+
+      typeRes.forEach(res => {
+        res.data.damage_relations.double_damage_from.forEach(weak => {
+          multiplierMap[weak.name] = (multiplierMap[weak.name] || 1) * 2
+        })
+        res.data.damage_relations.half_damage_from.forEach(resist => {
+          multiplierMap[resist.name] = (multiplierMap[resist.name] || 1) * 0.5
+        })
+        res.data.damage_relations.no_damage_from.forEach(immune => {
+          multiplierMap[immune.name] = 0
+        })
+
+        res.data.damage_relations.double_damage_to.forEach(strong => {
+          strongSet.add(strong.name)
+        })
+      })
+
+      const twoX = []
+      const fourX = []
+
+      Object.entries(multiplierMap).forEach(([type, mult]) => {
+        if (mult === 2) {
+          twoX.push(type)
+        } else if (mult === 4) {
+          fourX.push(type)
+        }
+      })
+
+      setWeaknesses2x(twoX)
+      setWeaknesses4x(fourX)
+      setStrongAgainst(Array.from(strongSet))
+    } catch (err) {
+      console.error("Error fetching combat data:", err)
+      setWeaknesses2x([])
+      setWeaknesses4x([])
+      setStrongAgainst([])
+    } finally {
+      setLoadingWeaknesses(false)
+    }
+  }
+
   const handleCardClick = async (pokemon) => {
     setSelectedPokemon(pokemon)
     setLoadingDetails(true)
+    setWeaknesses2x([])
+    setWeaknesses4x([])
+    setStrongAgainst([])
     try {
       const speciesRes = await axios.get(`https://pokeapi.co/api/v2/pokemon-species/${pokemon.id}`)
       
@@ -119,6 +175,8 @@ function App() {
         habitat: speciesRes.data.habitat ? speciesRes.data.habitat.name : 'Unknown',
         evolutions: hasEvolution ? chainNames : []
       })
+
+      await fetchCombatData(pokemon.types)
     } catch (err) {
       console.error("Error fetching extra details:", err)
       setPokemonDetails({ flavorText: 'Could not load details.', habitat: 'Unknown', evolutions: [] })
@@ -137,6 +195,9 @@ function App() {
   const closeModal = () => {
     setSelectedPokemon(null)
     setPokemonDetails(null)
+    setWeaknesses2x([])
+    setWeaknesses4x([])
+    setStrongAgainst([])
   }
 
   const toggleTypeFilter = (type) => {
@@ -183,7 +244,7 @@ function App() {
         boxSizing: 'border-box'
       }}
     >
-      <h1>Pokédex</h1>
+      <h1>Pokedex</h1>
       
       <div className="search-filter-bar" ref={filterRef}>
         <div className="search-box">
@@ -191,7 +252,7 @@ function App() {
             type="text" 
             value={search} 
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search a Pokemon"
+            placeholder="Search a Pokémon"
           />
         </div>
 
@@ -315,85 +376,150 @@ function App() {
 
       {selectedPokemon && (
         <div className="modal-overlay" onClick={closeModal}>
-          <div className={`modal-content card-bg-${mainType}`} onClick={(e) => e.stopPropagation()}>
-            <button className="close-btn" onClick={closeModal}>&times;</button>
-            
-            <div className="modal-header">
-              <span className="generation-badge">{getGenerationAndRegion(selectedPokemon.id).gen}</span>
-              <h2>{selectedPokemon.name.toUpperCase()} <span className="modal-id">#{selectedPokemon.id}</span></h2>
-              <p className="modal-region">{getGenerationAndRegion(selectedPokemon.id).region} Region</p>
+          <div className="modal-container-wrapper" onClick={(e) => e.stopPropagation()}>
+            <div className={`modal-content card-bg-${mainType}`}>
+              <button className="close-btn" onClick={closeModal}>&times;</button>
+              
+              <div className="modal-header">
+                <span className="generation-badge">{getGenerationAndRegion(selectedPokemon.id).gen}</span>
+                <h2>{selectedPokemon.name.toUpperCase()} <span className="modal-id">#{selectedPokemon.id}</span></h2>
+                <p className="modal-region">{getGenerationAndRegion(selectedPokemon.id).region} Region</p>
+              </div>
+
+              <img 
+                src={selectedPokemon.sprites?.other?.['official-artwork']?.front_default || selectedPokemon.sprites?.front_default} 
+                alt={selectedPokemon.name} 
+                className="modal-img"
+              />
+
+              {loadingDetails ? (
+                <p>Loading details...</p>
+              ) : (
+                <div className="modal-details">
+                  <p className="flavor-text">"{pokemonDetails?.flavorText}"</p>
+                  
+                  <div className="stats-grid">
+                    <div><strong>Height:</strong> {selectedPokemon.height / 10} m</div>
+                    <div><strong>Weight:</strong> {selectedPokemon.weight / 10} kg</div>
+                    <div><strong>Habitat:</strong> {pokemonDetails?.habitat}</div>
+                    <div><strong>Base Exp:</strong> {selectedPokemon.base_experience}</div>
+                  </div>
+
+                  <div className="section-title">Types</div>
+                  <div className="types-container">
+                    {selectedPokemon.types.map((t) => {
+                      const typeName = t.type.name;
+                      return (
+                        <span key={typeName} className={`type-badge type-${typeName}`}>
+                          {typeName}
+                        </span>
+                      )
+                    })}
+                  </div>
+
+                  <div className="section-title">Abilities</div>
+                  <div className="abilities-list">
+                    {selectedPokemon.abilities.map((a) => (
+                      <span key={a.ability.name} className="ability-badge">
+                        {a.ability.name} {a.is_hidden && '(Hidden)'}
+                      </span>
+                    ))}
+                  </div>
+
+                  {pokemonDetails?.evolutions && pokemonDetails.evolutions.length > 1 && (
+                    <>
+                      <div className="section-title">Evolution Chain</div>
+                      <div className="evolution-list">
+                        {pokemonDetails.evolutions.map((evoName, index) => (
+                          <span key={evoName} className="evolution-wrapper">
+                            <span 
+                              className="evolution-badge clickable" 
+                              onClick={() => handleEvolutionClick(evoName)}
+                            >
+                              {evoName.toUpperCase()}
+                            </span>
+                            {index < pokemonDetails.evolutions.length - 1 && <span className="evolution-arrow"> ➔ </span>}
+                          </span>
+                        ))}
+                      </div>
+                    </>
+                  )}
+
+                  <div className="section-title">Base Stats</div>
+                  <div className="base-stats">
+                    {selectedPokemon.stats.map((s) => (
+                      <div key={s.stat.name} className="stat-row">
+                        <span className="stat-name">{s.stat.name.toUpperCase()}:</span>
+                        <span className="stat-value">{s.base_stat}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
 
-            <img 
-              src={selectedPokemon.sprites?.other?.['official-artwork']?.front_default || selectedPokemon.sprites?.front_default} 
-              alt={selectedPokemon.name} 
-              className="modal-img"
-            />
-
-            {loadingDetails ? (
-              <p>Loading details...</p>
-            ) : (
-              <div className="modal-details">
-                <p className="flavor-text">"{pokemonDetails?.flavorText}"</p>
-                
-                <div className="stats-grid">
-                  <div><strong>Height:</strong> {selectedPokemon.height / 10} m</div>
-                  <div><strong>Weight:</strong> {selectedPokemon.weight / 10} kg</div>
-                  <div><strong>Habitat:</strong> {pokemonDetails?.habitat}</div>
-                  <div><strong>Base Exp:</strong> {selectedPokemon.base_experience}</div>
-                </div>
-
-                <div className="section-title">Types</div>
-                <div className="types-container">
-                  {selectedPokemon.types.map((t) => {
-                    const typeName = t.type.name;
-                    return (
-                      <span key={typeName} className={`type-badge type-${typeName}`}>
-                        {typeName}
-                      </span>
-                    )
-                  })}
-                </div>
-
-                <div className="section-title">Abilities</div>
-                <div className="abilities-list">
-                  {selectedPokemon.abilities.map((a) => (
-                    <span key={a.ability.name} className="ability-badge">
-                      {a.ability.name} {a.is_hidden && '(Hidden)'}
-                    </span>
-                  ))}
-                </div>
-
-                {pokemonDetails?.evolutions && pokemonDetails.evolutions.length > 1 && (
-                  <>
-                    <div className="section-title">Evolution Chain</div>
-                    <div className="evolution-list">
-                      {pokemonDetails.evolutions.map((evoName, index) => (
-                        <span key={evoName} className="evolution-wrapper">
-                          <span 
-                            className="evolution-badge clickable" 
-                            onClick={() => handleEvolutionClick(evoName)}
-                          >
-                            {evoName.toUpperCase()}
-                          </span>
-                          {index < pokemonDetails.evolutions.length - 1 && <span className="evolution-arrow"> ➔ </span>}
-                        </span>
-                      ))}
+            <div className="side-panels-column">
+              <div className={`weaknesses-panel card-bg-${mainType}`}>
+                <div className="section-title">Weaknesses</div>
+                {loadingWeaknesses ? (
+                  <p>Loading...</p>
+                ) : (
+                  <div className="weakness-sections">
+                    <div className="weakness-subgroup">
+                      <span className="weakness-label">2x Weak to:</span>
+                      <div className="types-container">
+                        {weaknesses2x.length > 0 ? (
+                          weaknesses2x.map(w => (
+                            <span key={w} className={`type-badge type-${w}`}>
+                              {w}
+                            </span>
+                          ))
+                        ) : (
+                          <p style={{ fontSize: '0.8rem', margin: '4px 0', color: '#334155' }}>None</p>
+                        )}
+                      </div>
                     </div>
-                  </>
+
+                    <div className="weakness-subgroup" style={{ marginTop: '15px' }}>
+                      <span className="weakness-label">4x Weak to:</span>
+                      <div className="types-container">
+                        {weaknesses4x.length > 0 ? (
+                          weaknesses4x.map(w => (
+                            <span key={w} className={`type-badge type-${w}`}>
+                              {w}
+                            </span>
+                          ))
+                        ) : (
+                          <p style={{ fontSize: '0.8rem', margin: '4px 0', color: '#334155' }}>None</p>
+                        )}
+                      </div>
+                    </div>
+                  </div>
                 )}
-
-                <div className="section-title">Base Stats</div>
-                <div className="base-stats">
-                  {selectedPokemon.stats.map((s) => (
-                    <div key={s.stat.name} className="stat-row">
-                      <span className="stat-name">{s.stat.name.toUpperCase()}:</span>
-                      <span className="stat-value">{s.base_stat}</span>
-                    </div>
-                  ))}
-                </div>
               </div>
-            )}
+
+              <div className={`weaknesses-panel card-bg-${mainType}`}>
+                <div className="section-title">Effective</div>
+                {loadingWeaknesses ? (
+                  <p>Loading...</p>
+                ) : (
+                  <div className="weakness-subgroup">
+                    <span className="weakness-label">Strong against:</span>
+                    <div className="types-container">
+                      {strongAgainst.length > 0 ? (
+                        strongAgainst.map(s => (
+                          <span key={s} className={`type-badge type-${s}`}>
+                            {s}
+                          </span>
+                        ))
+                      ) : (
+                        <p style={{ fontSize: '0.8rem', margin: '4px 0', color: '#334155' }}>None</p>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
           </div>
         </div>
       )}
